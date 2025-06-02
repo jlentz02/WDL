@@ -229,7 +229,7 @@ def sample(X, size, mode='train_classes', n_labels=0, label_hard=[], balanced = 
     if balanced:
         samp = samp/samp.sum(axis=1)[:,None]
     else:
-        samp = samp/(samp.max())
+        samp = samp/samp.max()
 
 
     if label_hard == []:
