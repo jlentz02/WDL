@@ -99,13 +99,13 @@ def sinkhorn_unbalanced(a, b, C, reg, reg_m, numMaxIter = 100, plan = True):
 #reg_m - marginal relaxation term (also known as tau)
 #weights - d x m tensor of weights where m is the number of barycenters to be returned
 #TODO Decide if weights should be d x m or m x d and then remove transpositions if necessary
-def UOT_barycenter_batched(A, C, reg, reg_m, weights, numItermax = 100):
-    #########TEST
+
+""" #########TEST
     p = torch.exp(torch.log(A) @ weights)
-    return p
+    return p """
 
-
-
+def UOT_barycenter_batched(A, C, reg, reg_m, weights, numItermax = 100):
+    
     #Establishing how big things are
     dim, n_hists = A.shape
 
@@ -356,6 +356,10 @@ def make_cost_matrix(size, scale):
     abs_diff_matrix = torch.abs(i - j)/scale
     return abs_diff_matrix
 
+def kl(a,b):
+    cost = a*torch.log(a/b) - a + b
+    return torch.sum(cost)
+
 # Parameters for the Gaussian distribution
 mean = 10       # Center of the distribution
 std_dev = 1.0    # Standard deviation (spread)
@@ -388,8 +392,9 @@ C = make_cost_matrix(100, 100).to(torch.double)
 C = C
 
 
-reg = 0.001
-reg_m = 1000
+reg = 0.1
+reg_m = 10
+
 """ 
 num_epochs = 500
 rec, D, loss_data = WDL(X, D, C, reg, reg_m, num_epochs=num_epochs, loss_type = "kl")
@@ -407,14 +412,17 @@ C = C
 
 A = torch.tensor([2,2,1,1,1], dtype = torch.double)
 B = torch.tensor([2,3,1,1,8], dtype = torch.double)
-x = torch.tensor([[2,2,1,1,1], [1,3,1,1,8], [1,4,4,5,1]], dtype = torch.double).T
-weights = torch.tensor([.25,.25,.5], dtype = torch.double)
-A = A + 1e-8
-B = B + 1e-8
+
+
+x = torch.tensor([[2,2,1,1,1], [2,3,1,1,8], [1,4,4,5,1]], dtype = torch.double).T
+weights = torch.tensor([1/3,1/3,1/3], dtype = torch.double)
 c = UOT_barycenter(x, C, reg, reg_m, weights)
-print("Barycenter: ", c)
+print("Barycenter:              ", c)
+
 geo_mean = torch.exp(torch.sum(weights*torch.log(x + 1e-8), dim=1))
 print("Weighted geometric mean: ", geo_mean)
+other_mean = torch.sum(torch.sqrt(x),  dim = 1)**2/9
+print("Squareroot sum mean:     ", other_mean)
 
 
 """ 
