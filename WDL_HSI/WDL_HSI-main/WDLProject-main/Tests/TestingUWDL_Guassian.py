@@ -405,10 +405,33 @@ plot_reconstruction(X.T, rec.T, D.T, num_epochs, reg, reg_m)
 #plot_loss_data(loss_data)
  """
 
+C2 = make_cost_matrix(4, 1).to(torch.double)
+Y = torch.tensor([[.1,.1,.1,.7], [.7,.1,.1,.1]], dtype = torch.double).T
+bary = ot.barycenter(Y, C2, reg)
+bary2 = torch.tensor([.4,.1,.1,.4], dtype = torch.double)
+p1 = ot.sinkhorn(bary, Y[:,0], C2, reg)
+p2 = ot.sinkhorn(bary, Y[:,1], C2, reg)
+p12 = ot.sinkhorn(bary2, Y[:,0], C2, reg)
+p22 = ot.sinkhorn(bary2, Y[:,1], C2, reg)
+print(bary)
+print(bary2)
+cost1 = torch.sum(p1*C2)
+cost2 = torch.sum(p2*C2)
+cost12 = torch.sum(p12*C2)
+cost22 = torch.sum(p22*C2)
+print(cost1)
+print(cost2)
+print(cost12)
+print(cost22)
+print(cost1 + cost2)
+print(cost12 + cost22)
+
+exit()
+
 
 #Make C
 C = make_cost_matrix(5, 1).to(torch.double)
-C = C
+
 
 A = torch.tensor([2,2,1,1,1], dtype = torch.double)
 B = torch.tensor([2,3,1,1,8], dtype = torch.double)
