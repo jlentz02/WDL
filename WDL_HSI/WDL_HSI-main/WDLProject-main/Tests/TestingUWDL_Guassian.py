@@ -389,62 +389,29 @@ D = D.T
 
 #Make C
 C = make_cost_matrix(100, 100).to(torch.double)
-C = C
 
 
-reg = 0.1
+reg = 0.05
 reg_m = 10
-
-""" 
-num_epochs = 500
-rec, D, loss_data = WDL(X, D, C, reg, reg_m, num_epochs=num_epochs, loss_type = "kl")
-print(torch.sum(D, dim = 0))
-print(torch.sum(X, dim = 0))
-print(torch.sum(rec, dim = 0))
-plot_reconstruction(X.T, rec.T, D.T, num_epochs, reg, reg_m)
-#plot_loss_data(loss_data)
- """
-
-C2 = make_cost_matrix(4, 1).to(torch.double)
-Y = torch.tensor([[.1,.1,.1,.7], [.7,.1,.1,.1]], dtype = torch.double).T
-bary = ot.barycenter(Y, C2, reg)
-bary2 = torch.tensor([.4,.1,.1,.4], dtype = torch.double)
-p1 = ot.sinkhorn(bary, Y[:,0], C2, reg)
-p2 = ot.sinkhorn(bary, Y[:,1], C2, reg)
-p12 = ot.sinkhorn(bary2, Y[:,0], C2, reg)
-p22 = ot.sinkhorn(bary2, Y[:,1], C2, reg)
-print(bary)
-print(bary2)
-cost1 = torch.sum(p1*C2)
-cost2 = torch.sum(p2*C2)
-cost12 = torch.sum(p12*C2)
-cost22 = torch.sum(p22*C2)
-print(cost1)
-print(cost2)
-print(cost12)
-print(cost22)
-print(cost1 + cost2)
-print(cost12 + cost22)
-
-exit()
 
 
 #Make C
-C = make_cost_matrix(5, 1).to(torch.double)
+C = make_cost_matrix(5, 1).to(torch.double)**2
 
 
 A = torch.tensor([2,2,1,1,1], dtype = torch.double)
 B = torch.tensor([2,3,1,1,8], dtype = torch.double)
 
+print(ot.unbalanced.lbfgsb_unbalanced(A, B, C, reg, reg_m))
 
-x = torch.tensor([[2,2,1,1,1], [2,3,1,1,8], [1,4,4,5,1]], dtype = torch.double).T
-weights = torch.tensor([1/3,1/3,1/3], dtype = torch.double)
+x = torch.tensor([[2,2,1,1,1], [2,3,1,1,8]], dtype = torch.double).T 
+weights = torch.tensor([1/2,1/2], dtype = torch.double)
 c = UOT_barycenter(x, C, reg, reg_m, weights)
 print("Barycenter:              ", c)
 
 geo_mean = torch.exp(torch.sum(weights*torch.log(x + 1e-8), dim=1))
 print("Weighted geometric mean: ", geo_mean)
-other_mean = torch.sum(torch.sqrt(x),  dim = 1)**2/9
+other_mean = torch.sum(torch.sqrt(x),  dim = 1)**2/4
 print("Squareroot sum mean:     ", other_mean)
 
 
@@ -478,8 +445,38 @@ plt.show()
 
 
 
-
-
+""" 
+num_epochs = 500
+rec, D, loss_data = WDL(X, D, C, reg, reg_m, num_epochs=num_epochs, loss_type = "kl")
+print(torch.sum(D, dim = 0))
+print(torch.sum(X, dim = 0))
+print(torch.sum(rec, dim = 0))
+plot_reconstruction(X.T, rec.T, D.T, num_epochs, reg, reg_m)
+#plot_loss_data(loss_data)
+ """
+""" 
+C2 = make_cost_matrix(4, 1).to(torch.double)
+Y = torch.tensor([[.1,.1,.1,.7], [.7,.1,.1,.1]], dtype = torch.double).T
+bary = ot.barycenter(Y, C2, reg)
+bary2 = torch.tensor([.4,.1,.1,.4], dtype = torch.double)
+p1 = ot.sinkhorn(bary, Y[:,0], C2, reg)
+p2 = ot.sinkhorn(bary, Y[:,1], C2, reg)
+p12 = ot.sinkhorn(bary2, Y[:,0], C2, reg)
+p22 = ot.sinkhorn(bary2, Y[:,1], C2, reg)
+print(bary)
+print(bary2)
+cost1 = torch.sum(p1*C2)
+cost2 = torch.sum(p2*C2)
+cost12 = torch.sum(p12*C2)
+cost22 = torch.sum(p22*C2)
+print(cost1)
+print(cost2)
+print(cost12)
+print(cost22)
+print(cost1 + cost2)
+print(cost12 + cost22)
+exit()
+ """
         
 
     
