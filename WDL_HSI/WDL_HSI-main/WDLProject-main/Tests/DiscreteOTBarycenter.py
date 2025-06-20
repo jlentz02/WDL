@@ -200,28 +200,29 @@ def kl(a,b):
 
 
 torch.manual_seed(42)
-""" 
-x = discrete_gaussian(7000, 500, 10000)
-y = discrete_gaussian(3000, 500, 10000) 
+
+x = discrete_gaussian(700, 50, 1000)
+y = discrete_gaussian(300, 50, 1000) 
 x = x/torch.sum(x)
 y = y/torch.sum(y)
- """
+
 
 
 num_dists = 2
-dist_size = 5000
+dist_size = 1000
 dists = [0 for x in range(num_dists)]
 for i in range(num_dists):
     dists[i] = random_distribution(dist_size)
 
 
-X = torch.stack(dists)
+X = torch.stack([x,y])
 X_cdf = torch.cumsum(X, dim = 1)
 X = X.T
 reg = 0.001
 weights_prelim = [1/num_dists for x in range(num_dists)]
 weights = torch.tensor(weights_prelim, dtype = torch.double)
-weights_manual = torch.tensor([.49,.51], dtype = torch.double)
+#weights = random_distribution(num_dists).double()
+weights_manual = torch.tensor([.40,.6], dtype = torch.double)
 #weights = weights_manual
 C = make_cost_matrix(dist_size,1).to(torch.double)**2/(dist_size)**2
 
@@ -236,7 +237,7 @@ my_bary = barycenter3(X_cdf, weights)
 end2 = time.time()
 
 print(f"Timer 2 took {end2 - start2:.4f} seconds")
-
+print(f"Time ratio: {(end1 - start1)/(end2 -start2 + 1e-8):.4f}")
 
 computed_cost = 0
 my_cost = 0
@@ -255,11 +256,13 @@ indices = torch.arange(len(X[:,0]))
 
 # Plot
 plt.figure(figsize=(8, 5))
+plt.plot(indices, x)
+plt.plot(indices, y)
 plt.plot(indices, bary, marker='^', label='bary', linestyle='--', linewidth=2)
 plt.plot(indices, my_bary, marker='v', label='my_bary', linestyle='--', linewidth=2)
 
 # Aesthetics
-plt.title(f"Barycenters, reg: {reg}, computed barycenter: {float(computed_cost):.4f}, my barycenter: {float(my_cost):.4f}")
+plt.title(f"Barycenters, reg: {reg}, price ratio: {computed_cost/my_cost}")
 plt.xlabel("Index")
 plt.ylabel("Probability")
 plt.grid(True, linestyle='--', alpha=0.5)
