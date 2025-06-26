@@ -38,10 +38,18 @@ def make_cost_matrix(size, scale):
     abs_diff_matrix = torch.abs(i - j)/scale
     return abs_diff_matrix
 
+def kl(a,b):
+    cost = a*torch.log(a/b) - a + b
+    return torch.sum(cost)
+
+def UOT_cost(X, C, a, b, reg_m):
+    cost = torch.sum(X*C) + reg_m*kl(torch.sum(X, dim = 1), a) + reg_m*kl(torch.sum(X, dim = 0), b)
+    return cost
+
 
 torch.manual_seed(42)
 
-dist_size = 4
+dist_size = 2
 
 """ 
 x = discrete_gaussian(70, 5, dist_size)
@@ -50,18 +58,20 @@ x = x/torch.sum(x)
 y = y/torch.sum(y)
  """
 
-x = torch.tensor([1,1,1,1], dtype = torch.double)
-y = torch.tensor([2,2,5,2], dtype = torch.double)
+x = torch.tensor([1,1], dtype = torch.double)
+y = torch.tensor([1,2], dtype = torch.double)
 
+my_plan = torch.tensor([[1e-6,1e-6], [.38, 1.55]])
 
-C = make_cost_matrix(dist_size,1).to(torch.double)**2/(dist_size)**2
-
-plan = ot.unbalanced.mm_unbalanced(x, y, C, reg_m = 1 )
-print(torch.sum(plan, dim = 0))
-print(torch.sum(plan, dim = 1))
+C = make_cost_matrix(dist_size,1).to(torch.double)**2
+reg_m = 1
+plan = ot.unbalanced.mm_unbalanced(x, y, C, reg_m, div = "kl")
 
 
 print(plan)
+
+print(UOT_cost(plan, C, x, y, reg_m))
+print(UOT_cost(my_plan, C, x, y, reg_m))
 exit()
 
 # X-axis indices
