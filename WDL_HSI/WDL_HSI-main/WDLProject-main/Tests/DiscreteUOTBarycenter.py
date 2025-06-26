@@ -59,12 +59,12 @@ y = y/torch.sum(y)
  """
 
 x = torch.tensor([1,1], dtype = torch.double)
-y = torch.tensor([1,2], dtype = torch.double)
+y = torch.tensor([2,25], dtype = torch.double)
 
 my_plan = torch.tensor([[1e-6,1e-6], [.38, 1.55]])
 
 C = make_cost_matrix(dist_size,1).to(torch.double)**2
-reg_m = 1
+reg_m = 10
 plan = ot.unbalanced.mm_unbalanced(x, y, C, reg_m, div = "kl")
 
 
@@ -72,6 +72,7 @@ print(plan)
 
 print(UOT_cost(plan, C, x, y, reg_m))
 print(UOT_cost(my_plan, C, x, y, reg_m))
+print(torch.sum(plan))
 exit()
 
 # X-axis indices
