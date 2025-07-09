@@ -109,7 +109,7 @@ def data_loader(mode='data', fname='SalinasA_correct.mat', matname='salinasA_cor
 #balanced: if True then the training data is reweighted to have total mass 1. If False it is left unweighted
 
 #NOTE: mu=geometric regularizer, reg=entropic regularizer
-def wdl_instance(k=2, train_size=100, dir_name='testing', reg=0.05, mu=0.1,
+def wdl_instance(k=2, train_size=100, dir_name='testing', reg=0.05, reg_m = 10000, mu=0.1,
                  max_iters=100, n_restarts=1, lr=0.01, cost_power=1, mode='train_classes', 
                  n_clusters=2, label_hard=[], training_data='', loss_method = "bregman", bary_method = "bregman", balanced = True, init_method='kmeans++-init'):
     dev = torch.device('cpu') #if torch.cuda.is_available() else torch.device("cpu")
@@ -150,9 +150,10 @@ def wdl_instance(k=2, train_size=100, dir_name='testing', reg=0.05, mu=0.1,
     #Does WDL 
     wdl = WDL(n_atoms=k, dir=dir_name)
     train_data = train_data.T
-    (weights, V_WDL) = WDL_do(dev, wdl, train_data, C, reg, mu, max_iters, lr, n_restarts, loss_method = loss_method, bary_method=bary_method, width = 201, init_method = init_method)
-    print(weights)
-    print(V_WDL)
+    (weights, V_WDL) = WDL_do(dev, wdl, train_data, C, reg, reg_m, mu, max_iters, lr, n_restarts, loss_method = loss_method, bary_method=bary_method, width = 201, init_method = init_method)
+    #torch.set_printoptions(threshold=10_000)
+    print(weights.T)
+    #print(V_WDL)
     torch.save(V_WDL, dir_name + '/atoms.pt')
     torch.save(weights, dir_name + '/coeff.pt')
 
@@ -241,13 +242,13 @@ def sample(X, size, mode='train_classes', n_labels=0, label_hard=[], balanced = 
 #More variables:
 #dev: device, wdl: wdl object, init_method: WDL initialization method
 #For more, on the other params, check WDL file
-def WDL_do(dev, wdl, data, C, reg=0.05, mu=0.1, max_iters=100, lr=0.01, n_restarts=2, init_method='kmeans++-init', loss_method = "bregman", bary_method = "bregman", width = None):
+def WDL_do(dev, wdl, data, C, reg=0.05, reg_m = 10000, mu=0.1, max_iters=100, lr=0.01, n_restarts=2, init_method='kmeans++-init', loss_method = "bregman", bary_method = "bregman", width = None):
     #Need to add a small constant to training data
     X=torch.tensor(data).to(dev)
     X = X + 1e-15
     weights = wdl.fit(X, C=C,
                 init_method=init_method, loss_method=loss_method,
-                bary_method=bary_method, reg=reg, mu=mu, max_iters=max_iters,
+                bary_method=bary_method, reg=reg, reg_m = reg_m, mu=mu, max_iters=max_iters,
                 max_sinkhorn_iters=5, jointOptimizer=torch.optim.Adam,
                 jointOptimKWargs={"lr": lr}, verbose=True, n_restarts=n_restarts,
                 log_iters=1, log=False, width = width)
@@ -699,12 +700,12 @@ def control_loop():
 #mu is a regulatization parameter
 #recip controls mu
 #OT_type: Does a normal run, or an UOT run
-def executeable_control_loop(k ,mu, OT_type = "OT", iters = 10):
+def executeable_control_loop(k ,mu = 1000, reg_m = 10000, OT_type = "OT", iters = 10):
     torch.set_default_dtype(torch.float64) 
     dev = torch.device('cpu')
 
     #default
-    #regs = [0.02, 0.05, 0.08, 0.1]
+    #regs = [.08, .09, .10, .11]
     regs = [.1]                                              
 
     mu = 1/mu 
@@ -714,24 +715,24 @@ def executeable_control_loop(k ,mu, OT_type = "OT", iters = 10):
         for reg in regs: 
             name = 'big_fixed_sample_k=' + str(k) + '_mu=' + str(mu) + '_reg=' + str(reg)
             wdl_instance(k=k, train_size=1002, dir_name=name, reg=reg, mu=mu,
-                        max_iters=iters, n_restarts=1, cost_power=1, 
+                        max_iters=iters, n_restarts=1, cost_power=2, 
                         mode = 'train_classes', n_clusters=6, 
-                        label_hard=[1, 10, 11, 12, 13, 14], training_data='', init_method= "rand-data")
+                        label_hard=[1, 10, 11, 12, 13, 14], training_data='', init_method= "kmeans++-init")
             clustering_loop(core_dir=name, NN_mode='or', train_mode='local')
     elif OT_type == "OT_test":
         for reg in regs: 
             name = 'big_fixed_sample_k=' + str(k) + '_mu=' + str(mu) + '_reg=' + str(reg)
             wdl_instance(k=k, train_size=1002, dir_name=name, reg=reg, mu=mu,
-                        max_iters=iters, n_restarts=1, cost_power=1, 
+                        max_iters=iters, n_restarts=1, cost_power=2, 
                         mode = 'train_classes', n_clusters=6, 
                         label_hard=[1, 10, 11, 12, 13, 14], training_data='', bary_method="barycenter_unbalanced")
                         #, loss_method="bregman_stabilized_unbalanced")
             clustering_loop(core_dir=name, NN_mode='or', train_mode='local')
     elif OT_type == "UOT":
         for reg in regs: 
-            name = 'UOT - ' +'big_fixed_sample_k=' + str(k) + '_mu=' + str(mu) + '_reg=' + str(reg)
-            wdl_instance(k=k, train_size=1002, dir_name=name, reg=reg, mu=mu,
-                        max_iters=iters, n_restarts=1, cost_power=1, 
+            name = 'UOT - ' +'big_fixed_sample_k=' + str(k) + '_mu=' + str(reg_m) + '_reg=' + str(reg)
+            wdl_instance(k=k, train_size=1002, dir_name=name, reg=reg, reg_m = reg_m, mu=mu,
+                        max_iters=iters, n_restarts=1, cost_power=2, 
                         mode = 'train_classes', n_clusters=6, 
                         label_hard=[1, 10, 11, 12, 13, 14], training_data='', bary_method = "barycenter_unbalanced", loss_method = "bregman_stabilized_unbalanced", balanced = False, init_method= "rand-data")
             clustering_loop(core_dir=name, NN_mode='or', train_mode='local')
@@ -1025,5 +1026,7 @@ if __name__ == "__main__":
     np.set_printoptions(suppress=True)
 
 #main?
-#k = #barycenters, mu = 1000
-#executeable_control_loop(2, 1000, "UOT", iters = 100)
+#k = barycenters, mu = 1000
+#use of mu is depreciated and should be ignored as an input
+reg_m =  1000
+executeable_control_loop(k = 18, OT_type = "UOT", iters = 500, reg_m = reg_m)   
