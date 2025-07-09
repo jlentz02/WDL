@@ -59,6 +59,7 @@ class WDL():
             sharp: bool = False,
             max_sinkhorn_iters: int = 10,
             reg: float = 1.0,
+            reg_m: float = 10000,
             locality: bool = False,
             mu: float = 0.0,
             #modification from original for runtime purposes
@@ -276,7 +277,7 @@ class WDL():
                                    height=height, width=width, sharp=sharp, dev=self.dev)
 
                 # select barycenter method
-                self.barycenterSolver = barycenter(C=C, reg=reg, maxiter=max_sinkhorn_iters, method=bary_method, dev=self.dev, height=height, width=width)
+                self.barycenterSolver = barycenter(C=C, reg=reg, reg_m = reg_m, maxiter=max_sinkhorn_iters, method=bary_method, dev=self.dev, height=height, width=width)
 
                 # residual_error = math.inf
                 # TODO: allow exiting after some tolerance criteria is met
@@ -327,7 +328,8 @@ class WDL():
                         # normalize loss
                         total_loss /= len(train_dl)
                         if verbose:
-                            print(f"Iteration: {curr_iter}, loss: {total_loss}")
+                            if curr_iter%25 == 0:
+                                print(f"Iteration: {curr_iter}, loss: {total_loss}")
                         if log:
                             # TODO: update logging to reflect new variables. Also consider looking into proper python logging
                             curr_idx = int(curr_iter / log_iters)
@@ -402,7 +404,10 @@ class WDL():
             for i in range(0, X.shape[1]):
                plan[i] = torch.sum(self.OTsolver(X[:, i], p[:, i])*cost)
             loss += sum(plan) """
-            loss += self.OTsolver(X, p).sum()
+            #loss_vector = abs(p - X)
+            #loss_vector = p*torch.log(p/X) - p + X
+            loss_vector = (p - X)**2
+            loss = loss_vector.sum()
 
         #What is the point of this??????????
         """ # Locality constraint

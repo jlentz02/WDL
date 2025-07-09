@@ -335,6 +335,7 @@ def bregmanStabilizedOT(a: torch.Tensor,
 def barycenter(C: torch.Tensor,
                method: str = "bregman",
                reg: float = 1.0,
+               reg_m: float = 100000,
                maxiter: int = 5,
                maxsinkiter: int = 7,
                dev: torch.device = torch.device("cpu"),
@@ -398,7 +399,7 @@ def barycenter(C: torch.Tensor,
     #Method added by me for, hopefully, doing UOT barycenters
     elif method == "barycenter_unbalanced":
         def UOTBary(D, w):
-            p = UOT_barycenter_batched(D, C = C, reg_m = .1, reg=reg, numItermax=maxiter, weights =w)
+            p = UOT_barycenter_batched(D, C = C, reg_m = reg_m, reg=reg, numItermax=maxiter, weights =w)
             return p
         return lambda D, w: UOTBary(D,w)
     else:
