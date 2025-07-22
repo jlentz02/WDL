@@ -79,14 +79,14 @@ def positivefy(data, pad=0):
 #Loads in data for use
 #Variable:
 #mode='data' or 'gt', loads in those respective files
-def data_loader(mode='data', fname='SalinasA_correct.mat', matname='salinasA_corrected'):
+def data_loader(mode='data', fname='SalinasA_correct.mat', matname='salinasA_corrected', gtfname = 'SalinasA_gt.mat', gtname = 'salinasA_gt' ):
     if mode == 'data':
         data = loadmat(fname, matname)
     elif mode == 'gt':
         data = loadmat(gtfname, gtname)
     data = data.reshape(data.shape[0]*data.shape[1], -1)
 
-    if mode != 'gt': #These bands couldn't find costs for so remove them
+    if mode != 'gt' and fname == "salinasA_correct.mat": #These bands couldn't find costs for so remove them
         data = np.delete(data, [0, 32, 94], axis=1)
 
     return positivefy(data) #Guarantees non-negativity, a couple channels didn't hold
@@ -111,14 +111,14 @@ def data_loader(mode='data', fname='SalinasA_correct.mat', matname='salinasA_cor
 #NOTE: mu=geometric regularizer, reg=entropic regularizer
 def wdl_instance(k=2, train_size=100, dir_name='testing', reg=0.05, reg_m = 10000, mu=0.1,
                  max_iters=100, n_restarts=1, lr=0.01, cost_power=1, mode='train_classes', 
-                 n_clusters=2, label_hard=[], training_data='', loss_method = "bregman", bary_method = "bregman", balanced = True, init_method='kmeans++-init'):
+                 n_clusters=2, label_hard=[], training_data='', data_set = "salinasA", loss_method = "bregman", bary_method = "bregman", balanced = True, init_method='kmeans++-init'):
     dev = torch.device('cpu') #if torch.cuda.is_available() else torch.device("cpu")
     storage(dir_name) #All results saved to dir_name
 
     #Sets up training data, if empty will generate new random ssample
     if training_data == '':
-        data = data_loader('data')
-        (train_data, lst, train_classes) = sample(data, train_size, mode=mode, n_labels=n_clusters, label_hard=label_hard, balanced = balanced)
+        data = data_loader('data', fname = data_set + "_correct.mat", matname= data_set + "_corrected")
+        (train_data, lst, train_classes) = sample(data, train_size, mode=mode, n_labels=n_clusters, label_hard=label_hard, balanced = balanced, data_set = data_set)
         #train_data is the data, lst is indicies in the array where data is (reshaped to 1d)
         train_data = train_data.astype(np.float64)
         train_index = torch.tensor(np.array(lst))
@@ -127,14 +127,14 @@ def wdl_instance(k=2, train_size=100, dir_name='testing', reg=0.05, reg_m = 1000
         train_data = torch.load(training_data)
         lst = torch.load('common_index.pt')
 
-
-
     #Cost matrix, you can load in a file, but also Cost() generates it
     cost_mode = 'L^' + str(cost_power)
     if type(cost_power) == str:
         C = torch.load(cost_power)
     else: 
-        C = Cost(cost_power)
+        C = Cost(cost_power, data_set = data_set)
+
+
 
     #Creates output file with parameters here just for tracking purposes
     with open(dir_name + '/params.txt', 'w') as file:
@@ -152,7 +152,7 @@ def wdl_instance(k=2, train_size=100, dir_name='testing', reg=0.05, reg_m = 1000
     train_data = train_data.T
     (weights, V_WDL) = WDL_do(dev, wdl, train_data, C, reg, reg_m, mu, max_iters, lr, n_restarts, loss_method = loss_method, bary_method=bary_method, width = 201, init_method = init_method)
     #torch.set_printoptions(threshold=10_000)
-    print(weights.T)
+    #print(weights.T)
     #print(V_WDL)
     torch.save(V_WDL, dir_name + '/atoms.pt')
     torch.save(weights, dir_name + '/coeff.pt')
@@ -167,19 +167,21 @@ def wdl_instance(k=2, train_size=100, dir_name='testing', reg=0.05, reg_m = 1000
 #Makes cost matrix given csv file of costs
 #Variables:
 #index: file index reference, cost_power: power in cost distance
-def Cost(cost_power):
+def Cost(cost_power, data_set):
+   
     vec = np.array([])
     size = 0
-    file = str(os.path.dirname(os.path.dirname(os.getcwd()))) + '/salinas_costs.csv'
+    file = str(os.path.dirname(os.path.dirname(os.getcwd()))) + "/" + data_set + "_costs.csv"
     with open(file) as csvfile:
         csvreader = csv.reader(csvfile, delimiter=',')
         for row in csvreader:
             vec = np.append(vec, float(row[2]))
             size += 1
+
     C = np.zeros((size, size))
     for i in range(0, C.shape[0]):
         for j in range(0, C.shape[1]):
-            C[i, j] = abs(vec[i] - vec[j])**cost_power
+            C[i, j] = abs(vec[i]-vec[j])**cost_power
     C = torch.tensor(C)
     C /= C.max()*0.1 #Divides like this to avoid numerical issues
     return C
@@ -196,18 +198,17 @@ def Cost(cost_power):
 #gt_index: File index used to pull gt labels 
 #label_hard: If want to preset labels
 #Data generated through call of sample under train classes
-def sample(X, size, mode='train_classes', n_labels=0, label_hard=[], balanced = True):
+def sample(X, size, mode='train_classes', n_labels=0, label_hard=[], balanced = True, data_set = "salinasA"):
     classes = set()
     lst = set()
-    gt_vals = data_loader('gt')
-    gt_data = loadmat(gtfname, gtname) 
+    gt_vals = data_loader('gt', gtfname= data_set + "_gt.mat", gtname= data_set + "_gt")
+    gt_data = loadmat(data_set + "_gt.mat", data_set + "_gt") 
     gt_data = gt_data.reshape(gt_data.shape[0]*gt_data.shape[1], -1)
-
     if mode == 'train_classes': #When want a certain number of training classes
         if len(label_hard) > 0:
             train_labels = label_hard
         else: #Will need to update labels for different images
-            train_labels = random.sample([1, 10, 11, 12, 13, 14], n_labels)
+            train_labels = random.sample(label_hard, n_labels)
         for i in range(1, len(train_labels) + 1):
             while len(lst) < i*size/len(train_labels): #Samples uniformly from each class
                 val = random.randint(0, X.shape[0] - 1)
@@ -330,27 +331,34 @@ def path_convert(path_temp):
 
 #For understanding, the run is clustering_loop(par_dir='/Salinas_A_experiments')
 def clustering_loop(core_dir='big_sample_k=', NN_mode='or', par_dir='', 
-                    savename='', train_mode='global', recon=False, savemode='HPC'):
+                    savename='', train_mode='global', recon=False, savemode='HPC',
+                    temp_k = 1, temp_reg_m = 10000, temp_reg = .1,
+                    dim_0 = 83, dim_1 = 86, n_clusters = 6, data_set = "salinasA"):
     
     #Sets up the color map, remap gt labels for ease of use
-    remap = {0: 0, 1: 1, 10: 2, 11: 3, 12: 4, 13: 5, 14: 6}
-    cmap = cm.get_cmap('viridis', 7)
-    new_cmap = mcolors.ListedColormap(cmap.colors)
-    new_cmap.colors[0] = (1, 1, 1, 1)
+    if data_set == "salinasA":
+        remap = {0: 0, 1: 1, 10: 2, 11: 3, 12: 4, 13: 5, 14: 6}
+        cmap = cm.get_cmap('viridis', 7)
+        new_cmap = mcolors.ListedColormap(cmap.colors)
+        new_cmap.colors[0] = (1, 1, 1, 1)
+    elif data_set == "indian_pines":
+        remap = {0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7, 8: 8, 9: 9, 10: 10, 11: 11, 12: 12, 13: 13, 14: 14, 15: 15, 16: 16}
+        cmap = cm.get_cmap('viridis', 17)
+        new_cmap = mcolors.ListedColormap(cmap.colors)
+        new_cmap.colors[0] = (1, 1, 1, 1)
 
     test_neighbors = [20, 25, 30, 35, 40, 45, 50] #NN we use
     
     params = np.zeros((len(test_neighbors)*1500, 5)) #Output matrix
     
     #Remaps the GT, and makes a mask for labeled points.
-    gt_data = data_loader('gt')
-    mask = np.zeros(83*86)
+    gt_data = data_loader('gt', gtfname= data_set + "_gt.mat", gtname= data_set + "_gt")
+    mask = np.zeros(dim_0*dim_1)
     for i in range(gt_data.shape[0]):
         gt_data[i] = remap.get(gt_data[i][0])
         if gt_data[i] != 0:
             mask[i] = 1
-    mask = np.reshape(mask, (83, 86))
-
+    mask = np.reshape(mask, (dim_0, dim_1))
     #If we do reconstructions, we need the cost matrix, loading it here
     if recon: 
         C = Cost(1)
@@ -361,6 +369,7 @@ def clustering_loop(core_dir='big_sample_k=', NN_mode='or', par_dir='',
         for path in pathlib.Path(os.getcwd() + par_dir).iterdir():
             path_temp = str(path)
             #Checks if valid directory
+            '''
             try: 
                 #Gets the k, mu, and reg values. 
                 #Path_convert() reliant on directory name being
@@ -368,6 +377,7 @@ def clustering_loop(core_dir='big_sample_k=', NN_mode='or', par_dir='',
                 (temp_k, temp_mu, temp_reg) = path_convert(path_temp)
             except:
                 continue
+            '''
             #If we are in right directory
             if core_dir in path_temp:
                 #Every once in a while, SC can fail for numerical reasons, so use this 
@@ -382,7 +392,7 @@ def clustering_loop(core_dir='big_sample_k=', NN_mode='or', par_dir='',
                         for i in range(weights.shape[1]):
                             rec[:,i] = barySolver(atoms, weights[:,i]).numpy().reshape(201,)
                         plt.plot(rec)
-                        plt.title('WDL Reconstruction k=' + str(temp_k) + ' reg=' + str(temp_reg) + ' geom=' + str(temp_mu))
+                        plt.title('WDL Reconstruction k=' + str(temp_k) + ' reg=' + str(temp_reg) + ' reg_m=' + str(temp_reg_m))
                         plt.savefig(path_temp + '/WDL_reconstruction.pdf')
                         np.save(path_temp + '/reconstructions', rec)
                         plt.close()
@@ -392,9 +402,8 @@ def clustering_loop(core_dir='big_sample_k=', NN_mode='or', par_dir='',
                     for i in range(0, weights.shape[1]):
                         weights[:,i] = weights[:,i]/np.linalg.norm(weights[:,i])
                     weights = weights.T @ weights
-
                     W = kneighbor_weights(weights, neighbors, constraint=NN_mode)
-                    labels = spectral_cluster(W, 6)
+                    labels = spectral_cluster(W, n_clusters)
 
                 except:
                     continue
@@ -408,7 +417,7 @@ def clustering_loop(core_dir='big_sample_k=', NN_mode='or', par_dir='',
                 
                 #gt_grapher visualizes gt of training data, gt_temp gets the gt 
                 #of each point
-                gt_grapher = np.zeros(83*86)
+                gt_grapher = np.zeros(dim_0*dim_1)
                 gt_temp = np.zeros(len(index))
                 for i in range(index.shape[0]):
                     element = gt_data[index[i]]
@@ -417,7 +426,6 @@ def clustering_loop(core_dir='big_sample_k=', NN_mode='or', par_dir='',
                     k = int(element)
                     gt_temp[i] = k
                     gt_grapher[index[i]] = k
-
                 #Need to remap the resulting SC labels to the correct ones
                 gt_labs = np.array(list(set(gt_temp)))
                 for i in range(len(labels)):
@@ -435,7 +443,7 @@ def clustering_loop(core_dir='big_sample_k=', NN_mode='or', par_dir='',
 
                 #Gets accuracy score
                 acc = 0
-                train_plot = np.zeros(83*86)
+                train_plot = np.zeros(dim_0*dim_1)
                 for i in range(len(labels)):
                     t = index[i]
                     j = labels[i]
@@ -445,13 +453,13 @@ def clustering_loop(core_dir='big_sample_k=', NN_mode='or', par_dir='',
 
                 #Accuracy percentage, prints out results
                 acc = acc/len(labels) 
-                print('atoms=' + str(temp_k), 'geom=' + str(temp_mu), 
+                print('atoms=' + str(temp_k), 'reg_m=' + str(temp_reg_m), 
                       'entropy=' + str(temp_reg), '| acc=' + str(acc))
                 
                 #Plots ground truth
-                train_plot = np.reshape(train_plot, (83, 86))  
+                train_plot = np.reshape(train_plot, (dim_0, dim_1))  
                 if  train_mode != 'global' and neighbors == 20: 
-                    gt_grapher = np.reshape(gt_grapher, (83, 86))
+                    gt_grapher = np.reshape(gt_grapher, (dim_0, dim_1))
                     plt.imshow(gt_grapher, cmap=cmap)
                     plt.title('Ground truth')
                     plt.savefig(path_temp + '/gt.pdf')
@@ -460,20 +468,20 @@ def clustering_loop(core_dir='big_sample_k=', NN_mode='or', par_dir='',
                 #Runs spatial_NN. It can be slow, so it will only run if
                 #clustering accuracy is above 60%. 
                 if acc >= 0.6:
-                    spatial_NN(train_plot, 10, new_cmap, path_temp, temp_k, temp_reg, temp_mu, neighbors, mask)
+                    spatial_NN(train_plot, 10, new_cmap, path_temp, temp_k, temp_reg, temp_reg_m, neighbors, mask)
                 
                 #Final plot
                 plt.imshow(train_plot, cmap=cmap)
                 plt.tick_params(left = False, right = False, labelleft = False, 
                 labelbottom = False, bottom = False) 
-                plt.title('Learned labels ' + 'atoms=' + str(temp_k) + ' mu=' + str(temp_mu) 
+                plt.title('Learned labels ' + 'atoms=' + str(temp_k) + ' reg_m=' + str(temp_reg_m) 
                             + ' reg=' + str(temp_reg) +  ' accuracy=' + str(round(acc, 2)))
                 plt.savefig(path_temp + '/learned_loose_clean_Acc=' + str(round(acc, 2)) + '_NN=' + str(neighbors) + '.pdf'
                             , bbox_inches='tight')
                 plt.clf()
 
                 #Saves the parameters and accuracy 
-                params[c,:] = [temp_mu, temp_k, temp_reg, neighbors, acc]
+                params[c,:] = [temp_reg_m, temp_k, temp_reg, neighbors, acc]
                 c += 1
     #Removes all rows that are all zeros, and then saves the matrix.
     params = params[~np.all(params == 0, axis=1)] 
@@ -700,42 +708,66 @@ def control_loop():
 #mu is a regulatization parameter
 #recip controls mu
 #OT_type: Does a normal run, or an UOT run
-def executeable_control_loop(k ,mu = 1000, reg_m = 10000, OT_type = "OT", iters = 10):
+def executeable_control_loop(k ,mu = 1000, reg_m = 10000, OT_type = "OT", iters = 10, data_set = "salinasA"):
     torch.set_default_dtype(torch.float64) 
     dev = torch.device('cpu')
 
     #default
     #regs = [.08, .09, .10, .11]
-    regs = [.1]                                              
-
+    regs = [.1]                                             
     mu = 1/mu 
+
+    #Data_set controls which data set the test is performed on.
+    #By default this is the SalinasA data set. 
+    #Configurations for additional data sets needs to be added manually.
+    #Currently supported is SalinasA and Indian Pines
+    if data_set == "salinasA":
+        train_size = 1002
+        n_clusters = 6
+        label_hard = [1, 10, 11, 12, 13, 14]
+        dim_0 = 83
+        dim_1 = 86
+    elif data_set == "indian_pines":
+        train_size = 1280
+        n_clusters = 16
+        label_hard = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16]
+        dim_0 = 145
+        dim_1 = 145
+
    
     #In addition to doing WDL, this will also run the clustering loop on the results.
     if OT_type == "OT":
         for reg in regs: 
-            name = 'big_fixed_sample_k=' + str(k) + '_mu=' + str(mu) + '_reg=' + str(reg)
-            wdl_instance(k=k, train_size=1002, dir_name=name, reg=reg, mu=mu,
+            name = data_set + ' - big_fixed_sample_k=' + str(k) + '_mu=' + str(mu) + '_reg=' + str(reg)
+            wdl_instance(k=k, train_size=train_size, dir_name=name, reg=reg, mu=mu,
                         max_iters=iters, n_restarts=1, cost_power=2, 
-                        mode = 'train_classes', n_clusters=6, 
-                        label_hard=[1, 10, 11, 12, 13, 14], training_data='', init_method= "kmeans++-init")
+                        mode = 'train_classes', n_clusters=n_clusters, 
+                        label_hard=label_hard, training_data='', init_method= "kmeans++-init")
             clustering_loop(core_dir=name, NN_mode='or', train_mode='local')
     elif OT_type == "OT_test":
         for reg in regs: 
-            name = 'big_fixed_sample_k=' + str(k) + '_mu=' + str(mu) + '_reg=' + str(reg)
-            wdl_instance(k=k, train_size=1002, dir_name=name, reg=reg, mu=mu,
+            name = data_set + ' - big_fixed_sample_k=' + str(k) + '_mu=' + str(mu) + '_reg=' + str(reg)
+            wdl_instance(k=k, train_size=train_size, dir_name=name, reg=reg, mu=mu,
                         max_iters=iters, n_restarts=1, cost_power=2, 
-                        mode = 'train_classes', n_clusters=6, 
-                        label_hard=[1, 10, 11, 12, 13, 14], training_data='', bary_method="barycenter_unbalanced")
+                        mode = 'train_classes', n_clusters=n_clusters, 
+                        label_hard=label_hard, training_data='', bary_method="barycenter_unbalanced")
                         #, loss_method="bregman_stabilized_unbalanced")
             clustering_loop(core_dir=name, NN_mode='or', train_mode='local')
     elif OT_type == "UOT":
         for reg in regs: 
-            name = 'UOT - ' +'big_fixed_sample_k=' + str(k) + '_mu=' + str(reg_m) + '_reg=' + str(reg)
-            wdl_instance(k=k, train_size=1002, dir_name=name, reg=reg, reg_m = reg_m, mu=mu,
+            name = "UOT - " +  data_set + ' - k=' + str(k) + '_reg_m=' + str(reg_m) + '_reg=' + str(reg)
+            #TODO
+            #Fix mode
+            #Fix cost matrix by getting spectra of Indian pines data set
+            wdl_instance(k=k, train_size=train_size, dir_name=name, reg=reg, mu=mu,
                         max_iters=iters, n_restarts=1, cost_power=2, 
-                        mode = 'train_classes', n_clusters=6, 
-                        label_hard=[1, 10, 11, 12, 13, 14], training_data='', bary_method = "barycenter_unbalanced", loss_method = "bregman_stabilized_unbalanced", balanced = False, init_method= "rand-data")
-            clustering_loop(core_dir=name, NN_mode='or', train_mode='local')
+                        mode = 'true_random', n_clusters=n_clusters, 
+                        label_hard=label_hard, training_data='', data_set = data_set,
+                        bary_method = "barycenter_unbalanced", loss_method = "bregman_stabilized_unbalanced", balanced = False, init_method= "rand-data")
+             #Pass in temp variables
+            clustering_loop(core_dir=name, NN_mode='or', train_mode='local',
+                            temp_k = k, temp_reg_m = reg_m, temp_reg = reg,
+                            dim_0 = dim_0, dim_1 = dim_1, n_clusters = n_clusters, data_set=data_set)
 
 #Spatial K-NN
 #Now this is near exclusively run inside clustering_loop() so some of these params
@@ -1029,4 +1061,5 @@ if __name__ == "__main__":
 #k = barycenters, mu = 1000
 #use of mu is depreciated and should be ignored as an input
 reg_m =  1000
-executeable_control_loop(k = 18, OT_type = "UOT", iters = 500, reg_m = reg_m)   
+#Supported data sets are "salinasA" and "indian_pines"
+executeable_control_loop(k = 12, OT_type = "UOT", iters = 500, reg_m = reg_m, data_set = "salinasA")   
