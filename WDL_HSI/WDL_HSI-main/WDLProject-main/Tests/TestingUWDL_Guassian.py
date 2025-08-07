@@ -3,8 +3,10 @@ import ot
 from torch.optim import Adam
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
+from scipy.optimize import curve_fit
 import numpy as np
 import random
+import math
 
 #UOT_barycenter method analogous to the method used in POT library
 #Rewritten to more explicity use pytorch tensors and to be able to compute k barycenters
@@ -360,6 +362,28 @@ def kl(a,b):
     cost = a*torch.log(a/b) - a + b
     return torch.sum(cost)
 
+def unbalanced_transport_cost(C, X, a, b, tau):
+    """
+    Compute the unbalanced OT cost:
+    <C, X> + tau * KL(X1 || a) + tau * KL(X2 || b)
+
+    Parameters:
+    - C: (n, m) cost matrix
+    - X: (n, m) transport plan
+    - a: (n,) source marginal
+    - b: (m,) target marginal
+    - tau: scalar or scalar tensor
+    - kl: function kl(p, q) -> scalar
+
+    Returns:
+    - total cost: scalar tensor
+    """
+    transport_cost = torch.sum(C * X)
+    X1 = torch.sum(X, dim=1)  # row sums
+    X2 = torch.sum(X, dim=0)  # column sums
+    return transport_cost + tau * (kl(X1, a) + kl(X2, b))
+
+
 # Parameters for the Gaussian distribution
 mean = 10       # Center of the distribution
 std_dev = 1.0    # Standard deviation (spread)
@@ -391,28 +415,46 @@ D = D.T
 C = make_cost_matrix(100, 100).to(torch.double)
 
 
-reg = 0.05
+reg = 0
 reg_m = 10
 
 
-#Make C
-C = make_cost_matrix(5, 1).to(torch.double)**2
+# Your input data
+reg = 0
+C = make_cost_matrix(3, 1).to(torch.double)**2
+A = torch.tensor([3,1,2], dtype=torch.double)
+B = torch.tensor([2,2,1], dtype=torch.double)
+Abal = A/torch.sum(A)
+Bbal = B/torch.sum(B)
 
 
-A = torch.tensor([2,2,1,1,1], dtype = torch.double)
-B = torch.tensor([2,3,1,1,8], dtype = torch.double)
+plan_low = ot.unbalanced.lbfgsb_unbalanced(A, B, C, reg, 1)
+print(plan_low)
+plan_mid = ot.unbalanced.lbfgsb_unbalanced(A, B, C, reg, reg_m)
+print(plan_mid)
+mid_cost = unbalanced_transport_cost(C, plan_mid, A, B, reg_m)
+print("Real cost", mid_cost)
+plan_high = ot.emd(Abal, Bbal, C)*math.sqrt(30)
 
-print(ot.unbalanced.lbfgsb_unbalanced(A, B, C, reg, reg_m))
+c = 3.3
+plan_int = plan_low*(1-math.exp(-c/reg_m)) + plan_high*(math.exp(-c/reg_m))
+print(plan_int)
+int_cost = unbalanced_transport_cost(C, plan_int, A, B, reg_m)
+print("Interpolated cost", int_cost)
 
-x = torch.tensor([[2,2,1,1,1], [2,3,1,1,8]], dtype = torch.double).T 
+print(plan_high)
+
+
+exit()
+x = torch.tensor([[2,2,1,1,1], [2,3,1,1,7]], dtype = torch.double).T 
+x_reweighted = torch.stack([a,b]).T
 weights = torch.tensor([1/2,1/2], dtype = torch.double)
 c = UOT_barycenter(x, C, reg, reg_m, weights)
 print("Barycenter:              ", c)
-
-geo_mean = torch.exp(torch.sum(weights*torch.log(x + 1e-8), dim=1))
-print("Weighted geometric mean: ", geo_mean)
-other_mean = torch.sum(torch.sqrt(x),  dim = 1)**2/4
-print("Squareroot sum mean:     ", other_mean)
+#d = ot.barycenter(x_reweighted, C, reg, weights)
+#print("Barycenter:              ", d)
+print(torch.sum(c))
+print(torch.sqrt(torch.sum(A)*torch.sum(B)))
 
 
 """ 

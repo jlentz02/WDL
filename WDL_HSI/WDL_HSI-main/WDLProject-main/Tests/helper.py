@@ -26,6 +26,12 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import confusion_matrix
 from sklearn.neighbors import kneighbors_graph
 from scipy.optimize import linear_sum_assignment
+from scipy.ndimage import generic_filter
+from sklearn.metrics.pairwise import euclidean_distances
+
+from collections import Counter
+import pandas as pd
+from pathlib import Path
 
 #Data file names, made as global variables for ease of use
 fname = 'SalinasA_correct.mat'
@@ -117,7 +123,14 @@ def wdl_instance(k=2, train_size=100, dir_name='testing', reg=0.05, reg_m = 1000
 
     #Sets up training data, if empty will generate new random ssample
     if training_data == '':
-        data = data_loader('data', fname = data_set + "_correct.mat", matname= data_set + "_corrected")
+        if data_set == "salinasA":
+            data = data_loader('data', fname = data_set + "_correct.mat", matname= data_set + "_corrected")
+        elif data_set == "indian_pines":
+            data = data_loader('data', fname = data_set + "_correct.mat", matname= data_set + "_corrected")
+        elif data_set == "pavia":
+            data = data_loader('data', fname = data_set, matname= data_set)
+        elif data_set == "paviaU":
+            data = data_loader('data', fname = data_set, matname= data_set)
         (train_data, lst, train_classes) = sample(data, train_size, mode=mode, n_labels=n_clusters, label_hard=label_hard, balanced = balanced, data_set = data_set)
         #train_data is the data, lst is indicies in the array where data is (reshaped to 1d)
         train_data = train_data.astype(np.float64)
@@ -319,6 +332,57 @@ def path_convert(path_temp):
     
     return (path_temp_k, path_temp_mu, path_temp_reg)
 
+
+
+
+def safe_mode(array):
+    """Returns the most common element (lowest one in case of tie)."""
+    counts = Counter(array)
+    max_count = max(counts.values())
+    mode_vals = [k for k, v in counts.items() if v == max_count]
+    return min(mode_vals)  # Choose smallest in case of tie
+
+def majority_vote_remap(y_pred, y_true):
+    y_pred = np.array(y_pred)
+    y_true = np.array(y_true)
+    new_pred = np.zeros_like(y_pred)
+
+    for cluster in np.unique(y_pred):
+        mask = y_pred == cluster
+        if np.any(mask):
+            majority_label = safe_mode(y_true[mask])
+            new_pred[mask] = majority_label
+    return new_pred
+
+def purity_score(y_pred, y_true):
+    """
+    Compute the purity score for a clustering assignment.
+
+    Parameters:
+    y_true (array-like): Ground truth labels
+    y_pred (array-like): Predicted cluster labels
+
+    Returns:
+    float: Purity score (between 0 and 1)
+    """
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+
+    total = 0
+    for cluster in np.unique(y_pred):
+        # Get indices of samples in this cluster
+        mask = y_pred == cluster
+        # Get the ground truth labels for these samples
+        true_labels = y_true[mask]
+        # Count the most common ground truth label
+        most_common_count = Counter(true_labels).most_common(1)[0][1]
+        total += most_common_count
+
+    return total / len(y_true)
+
+
+
+
 #Clustering loop that goes through WDL results, does SC, and spatial inpainting.
 #Idea is we have big parent directory and are looking through it's subdirectories. 
 #Variables: 
@@ -333,7 +397,7 @@ def path_convert(path_temp):
 def clustering_loop(core_dir='big_sample_k=', NN_mode='or', par_dir='', 
                     savename='', train_mode='global', recon=False, savemode='HPC',
                     temp_k = 1, temp_reg_m = 10000, temp_reg = .1,
-                    dim_0 = 83, dim_1 = 86, n_clusters = 6, data_set = "salinasA"):
+                    dim_0 = 83, dim_1 = 86, n_clusters = 6, data_set = "salinasA", purity_test = False):
     
     #Sets up the color map, remap gt labels for ease of use
     if data_set == "salinasA":
@@ -343,11 +407,22 @@ def clustering_loop(core_dir='big_sample_k=', NN_mode='or', par_dir='',
         new_cmap.colors[0] = (1, 1, 1, 1)
     elif data_set == "indian_pines":
         remap = {0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7, 8: 8, 9: 9, 10: 10, 11: 11, 12: 12, 13: 13, 14: 14, 15: 15, 16: 16}
-        cmap = cm.get_cmap('viridis', 17)
+        cmap = cm.get_cmap('inferno', 17)
+        new_cmap = mcolors.ListedColormap(cmap.colors)
+        new_cmap.colors[0] = (1, 1, 1, 1)
+    elif data_set == "pavia":
+        remap = {0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7, 8: 8, 9: 9}
+        cmap = cm.get_cmap('magma', 10)
+        new_cmap = mcolors.ListedColormap(cmap.colors)
+        new_cmap.colors[0] = (1, 1, 1, 1)
+    elif data_set == "paviaU":
+        remap = {0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7, 8: 8, 9: 9}
+        cmap = cm.get_cmap('viridis', 10)
         new_cmap = mcolors.ListedColormap(cmap.colors)
         new_cmap.colors[0] = (1, 1, 1, 1)
 
-    test_neighbors = [20, 25, 30, 35, 40, 45, 50] #NN we use
+
+    test_neighbors = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50] #NN we use
     
     params = np.zeros((len(test_neighbors)*1500, 5)) #Output matrix
     
@@ -363,6 +438,11 @@ def clustering_loop(core_dir='big_sample_k=', NN_mode='or', par_dir='',
     if recon: 
         C = Cost(1)
 
+
+    #Want to calculate and return average purity based on number of clusters
+    purity = 0
+    min_purity = 100
+    max_purity = 0
     #The main loop. Iterates through neighbors, then goes through each directory
     c = 0
     for neighbors in test_neighbors: 
@@ -426,10 +506,23 @@ def clustering_loop(core_dir='big_sample_k=', NN_mode='or', par_dir='',
                     k = int(element)
                     gt_temp[i] = k
                     gt_grapher[index[i]] = k
-                #Need to remap the resulting SC labels to the correct ones
-                gt_labs = np.array(list(set(gt_temp)))
-                for i in range(len(labels)):
-                    labels[i] = gt_labs[label_set.index(labels[i])]
+
+                if purity_test:
+                    purity_temp = purity_score(labels, gt_temp)
+                    purity += purity_temp
+                    print(purity_temp)
+                    if purity_temp > max_purity:
+                        max_purity = purity_temp
+                    if purity_temp < min_purity:
+                        min_purity = purity_temp
+
+                    labels = majority_vote_remap(labels, gt_temp)
+                    gt_labs = np.array(list(set(gt_temp)))
+                if not purity_test:
+                    #Need to remap the resulting SC labels to the correct ones
+                    gt_labs = np.array(list(set(gt_temp)))
+                    for i in range(len(labels)):
+                        labels[i] = gt_labs[label_set.index(labels[i])]
 
                 #Linear assignment to match clusters
                 confusion = confusion_matrix(gt_temp, labels)
@@ -467,18 +560,50 @@ def clustering_loop(core_dir='big_sample_k=', NN_mode='or', par_dir='',
                 
                 #Runs spatial_NN. It can be slow, so it will only run if
                 #clustering accuracy is above 60%. 
-                if acc >= 0.6:
-                    spatial_NN(train_plot, 10, new_cmap, path_temp, temp_k, temp_reg, temp_reg_m, neighbors, mask)
+                #if acc >= 0.6:
+                #    spatial_NN(train_plot, 10, new_cmap, path_temp, temp_k, temp_reg, temp_reg_m, neighbors, mask)
                 
                 #Final plot
                 plt.imshow(train_plot, cmap=cmap)
                 plt.tick_params(left = False, right = False, labelleft = False, 
                 labelbottom = False, bottom = False) 
                 plt.title('Learned labels ' + 'atoms=' + str(temp_k) + ' reg_m=' + str(temp_reg_m) 
-                            + ' reg=' + str(temp_reg) +  ' accuracy=' + str(round(acc, 2)))
-                plt.savefig(path_temp + '/learned_loose_clean_Acc=' + str(round(acc, 2)) + '_NN=' + str(neighbors) + '.pdf'
+                            + ' reg=' + str(temp_reg)  + "_clusters=" + str(n_clusters) + ' accuracy=' + str(round(acc, 2)))
+                plt.savefig(path_temp + '/learned_loose_clean_Acc=' + str(round(acc, 2)) + '_NN=' + str(neighbors) + "_clusters=" + str(n_clusters) +'.pdf'
                             , bbox_inches='tight')
                 plt.clf()
+
+                #Below code saves test data to experiment_data.xlsx
+                # === CONFIGURATION ===
+                excel_path = Path("experiment_data.xlsx")
+
+                # === BUILD ROW ===
+                test_type = "Purity" if purity_test else "Accuracy"
+
+                new_row = {
+                    "type": test_type,
+                    "data_set": data_set,
+                    "num_atoms": int(temp_k),
+                    "reg_m": int(temp_reg_m),
+                    "reg": float(temp_reg),
+                    "nn": int(neighbors),
+                    "n_clusters": int(n_clusters),
+                    "score": float(round(acc, 2))
+                }
+
+                # === WRITE TO EXCEL ===
+                if excel_path.exists():
+                    df = pd.read_excel(excel_path)
+                    df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+                else:
+                    df = pd.DataFrame([new_row])
+
+                # Optional: drop duplicates if needed
+                df.drop_duplicates(inplace=True)
+
+                df.to_excel(excel_path, index=False)
+                print("✓ Row added to Excel.")
+
 
                 #Saves the parameters and accuracy 
                 params[c,:] = [temp_reg_m, temp_k, temp_reg, neighbors, acc]
@@ -489,6 +614,7 @@ def clustering_loop(core_dir='big_sample_k=', NN_mode='or', par_dir='',
         np.save(core_dir + '/NN_results_' + NN_mode, params)
     else:
         np.save(os.getcwd() + par_dir + '/NN_results' + savename, params)
+    return (purity/11, min_purity, max_purity)
 
 
 #Buckets: support, assuming its [0, buckets]
@@ -708,13 +834,13 @@ def control_loop():
 #mu is a regulatization parameter
 #recip controls mu
 #OT_type: Does a normal run, or an UOT run
-def executeable_control_loop(k ,mu = 1000, reg_m = 10000, OT_type = "OT", iters = 10, data_set = "salinasA"):
+def executeable_control_loop(k ,mu = 1000, reg_m = 10000, OT_type = "OT", iters = 10, data_set = "salinasA", purity_test = False):
     torch.set_default_dtype(torch.float64) 
     dev = torch.device('cpu')
 
     #default
-    #regs = [.08, .09, .10, .11]
-    regs = [.1]                                             
+    regs = [.07, .08]
+    #regs = [.1]                                             
     mu = 1/mu 
 
     #Data_set controls which data set the test is performed on.
@@ -733,7 +859,18 @@ def executeable_control_loop(k ,mu = 1000, reg_m = 10000, OT_type = "OT", iters 
         label_hard = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16]
         dim_0 = 145
         dim_1 = 145
-
+    elif data_set == "pavia":
+        train_size = 1080
+        n_clusters = 9
+        label_hard = [1,2,3,4,5,6,7,8,9]
+        dim_0 = 1096
+        dim_1 = 715
+    elif data_set == "paviaU":
+        train_size = 1080
+        n_clusters = 9
+        label_hard = [1,2,3,4,5,6,7,8,9]
+        dim_0 = 610
+        dim_1 = 340
    
     #In addition to doing WDL, this will also run the clustering loop on the results.
     if OT_type == "OT":
@@ -765,9 +902,37 @@ def executeable_control_loop(k ,mu = 1000, reg_m = 10000, OT_type = "OT", iters 
                         label_hard=label_hard, training_data='', data_set = data_set,
                         bary_method = "barycenter_unbalanced", loss_method = "bregman_stabilized_unbalanced", balanced = False, init_method= "rand-data")
              #Pass in temp variables
-            clustering_loop(core_dir=name, NN_mode='or', train_mode='local',
-                            temp_k = k, temp_reg_m = reg_m, temp_reg = reg,
-                            dim_0 = dim_0, dim_1 = dim_1, n_clusters = n_clusters, data_set=data_set)
+            if purity_test:
+                purity_avg_vals = []
+                purity_min_vals = []
+                purity_max_vals = []
+                clusters = [x + n_clusters for x in range(0,10)]
+                for n in clusters:
+                    print(str(n) + " clusters")
+                    (avg_purity, min_purity, max_purity) = clustering_loop(core_dir=name, NN_mode='or', train_mode='local',
+                                temp_k = k, temp_reg_m = reg_m, temp_reg = reg,
+                                dim_0 = dim_0, dim_1 = dim_1, n_clusters = n, data_set=data_set, purity_test = True)
+                    purity_avg_vals.append(avg_purity)
+                    purity_min_vals.append(min_purity)
+                    purity_max_vals.append(max_purity)
+                    
+
+                plt.plot(clusters, purity_avg_vals, color="red", label="Average Purity", linewidth=2)
+                plt.plot(clusters, purity_min_vals, color="blue", label="Min Purity", linestyle="--")
+                plt.plot(clusters, purity_max_vals, color="green", label="Max Purity", linestyle="--")
+
+                plt.title("Purity Scores Across Different Cluster Counts - " + data_set + ", atoms=" + str(k) + ", reg_m = " + str(reg_m) + ", entropy = " + str(reg), fontsize=14)
+                plt.xlabel("Number of Clusters", fontsize=12)
+                plt.ylabel("Purity", fontsize=12)
+
+                plt.legend()
+                plt.grid(True)
+                plt.tight_layout()
+                plt.show()
+            if not purity_test:
+                clustering_loop(core_dir=name, NN_mode='or', train_mode='local',
+                                temp_k = k, temp_reg_m = reg_m, temp_reg = reg,
+                                dim_0 = dim_0, dim_1 = dim_1, n_clusters = n_clusters, data_set=data_set, purity_test= False)
 
 #Spatial K-NN
 #Now this is near exclusively run inside clustering_loop() so some of these params
@@ -1060,6 +1225,6 @@ if __name__ == "__main__":
 #main?
 #k = barycenters, mu = 1000
 #use of mu is depreciated and should be ignored as an input
-reg_m =  1000
-#Supported data sets are "salinasA" and "indian_pines"
-executeable_control_loop(k = 12, OT_type = "UOT", iters = 500, reg_m = reg_m, data_set = "salinasA")   
+reg_m =  10000
+#Supported data sets are "salinasA", "indian_pines", "pavia", and "paviaU"
+executeable_control_loop(k = 30, OT_type = "UOT", iters = 500, reg_m = reg_m, data_set = "pavia", purity_test = True)   
