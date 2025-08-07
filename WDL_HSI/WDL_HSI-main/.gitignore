@@ -151,3 +151,11 @@ notebooks/.ipynb_checkpoints/
 
 *.DS_Store
 /new_wdl_tests/MNIST Tests/results/
+
+#Large data files
+/Indian_pines_correct.mat
+/Indian_pines_gt.mat
+/Pavia_gt.mat
+/Pavia.mat
+/PaviaU_gt.mat
+/PaviaU.mat
