@@ -33,6 +33,11 @@ from collections import Counter
 import pandas as pd
 from pathlib import Path
 
+
+#For tracking fails
+fails = []
+
+
 #Data file names, made as global variables for ease of use
 fname = 'SalinasA_correct.mat'
 matname = 'salinasA_corrected'
@@ -394,7 +399,7 @@ def purity_score(y_pred, y_true):
 #recon: Will get reconstructions of training data if true. 
 
 #For understanding, the run is clustering_loop(par_dir='/Salinas_A_experiments')
-def clustering_loop(core_dir='big_sample_k=', NN_mode='or', par_dir='', 
+def  clustering_loop(core_dir='big_sample_k=', NN_mode='or', par_dir='', 
                     savename='', train_mode='global', recon=False, savemode='HPC',
                     temp_k = 1, temp_reg_m = 10000, temp_reg = .1,
                     dim_0 = 83, dim_1 = 86, n_clusters = 6, data_set = "salinasA", purity_test = False):
@@ -412,7 +417,7 @@ def clustering_loop(core_dir='big_sample_k=', NN_mode='or', par_dir='',
         new_cmap.colors[0] = (1, 1, 1, 1)
     elif data_set == "pavia":
         remap = {0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7, 8: 8, 9: 9}
-        cmap = cm.get_cmap('magma', 10)
+        cmap = cm.get_cmap('viridis', 10)
         new_cmap = mcolors.ListedColormap(cmap.colors)
         new_cmap.colors[0] = (1, 1, 1, 1)
     elif data_set == "paviaU":
@@ -839,8 +844,8 @@ def executeable_control_loop(k ,mu = 1000, reg_m = 10000, OT_type = "OT", iters 
     dev = torch.device('cpu')
 
     #default
-    regs = [.07, .08]
-    #regs = [.1]                                             
+    #regs = [.06,.07,.08,.09,.1]
+    regs = [.07]                                             
     mu = 1/mu 
 
     #Data_set controls which data set the test is performed on.
@@ -860,6 +865,7 @@ def executeable_control_loop(k ,mu = 1000, reg_m = 10000, OT_type = "OT", iters 
         dim_0 = 145
         dim_1 = 145
     elif data_set == "pavia":
+        #change this back to 1080
         train_size = 1080
         n_clusters = 9
         label_hard = [1,2,3,4,5,6,7,8,9]
@@ -871,6 +877,7 @@ def executeable_control_loop(k ,mu = 1000, reg_m = 10000, OT_type = "OT", iters 
         label_hard = [1,2,3,4,5,6,7,8,9]
         dim_0 = 610
         dim_1 = 340
+
    
     #In addition to doing WDL, this will also run the clustering loop on the results.
     if OT_type == "OT":
@@ -878,9 +885,11 @@ def executeable_control_loop(k ,mu = 1000, reg_m = 10000, OT_type = "OT", iters 
             name = data_set + ' - big_fixed_sample_k=' + str(k) + '_mu=' + str(mu) + '_reg=' + str(reg)
             wdl_instance(k=k, train_size=train_size, dir_name=name, reg=reg, mu=mu,
                         max_iters=iters, n_restarts=1, cost_power=2, 
-                        mode = 'train_classes', n_clusters=n_clusters, 
-                        label_hard=label_hard, training_data='', init_method= "kmeans++-init")
-            clustering_loop(core_dir=name, NN_mode='or', train_mode='local')
+                        mode = 'true_random', n_clusters=n_clusters, 
+                        label_hard=label_hard, training_data='', init_method= "rand-data", data_set= data_set)
+            clustering_loop(core_dir=name, NN_mode='or', train_mode='local',
+                                temp_k = k, temp_reg_m = reg_m, temp_reg = reg,
+                                dim_0 = dim_0, dim_1 = dim_1, n_clusters = n_clusters, data_set=data_set, purity_test= False)
     elif OT_type == "OT_test":
         for reg in regs: 
             name = data_set + ' - big_fixed_sample_k=' + str(k) + '_mu=' + str(mu) + '_reg=' + str(reg)
@@ -929,10 +938,14 @@ def executeable_control_loop(k ,mu = 1000, reg_m = 10000, OT_type = "OT", iters 
                 plt.grid(True)
                 plt.tight_layout()
                 plt.show()
-            if not purity_test:
-                clustering_loop(core_dir=name, NN_mode='or', train_mode='local',
+            if not purity_test: 
+                try:
+                    clustering_loop(core_dir=name, NN_mode='or', train_mode='local',
                                 temp_k = k, temp_reg_m = reg_m, temp_reg = reg,
                                 dim_0 = dim_0, dim_1 = dim_1, n_clusters = n_clusters, data_set=data_set, purity_test= False)
+                except:
+                    print(f"Failed on: {k}, {reg}, {reg_m}" )
+                    fails.append(f"{k}, {reg}, {reg_m}" )
 
 #Spatial K-NN
 #Now this is near exclusively run inside clustering_loop() so some of these params
@@ -1222,9 +1235,13 @@ if __name__ == "__main__":
     dev = torch.device('cpu')
     np.set_printoptions(suppress=True)
 
-#main?
-#k = barycenters, mu = 1000
-#use of mu is depreciated and should be ignored as an input
-reg_m =  10000
+
+
 #Supported data sets are "salinasA", "indian_pines", "pavia", and "paviaU"
-executeable_control_loop(k = 30, OT_type = "UOT", iters = 500, reg_m = reg_m, data_set = "pavia", purity_test = True)   
+#Salinas
+k = 18
+reg_m = 10000
+
+executeable_control_loop(k = k, OT_type = "OT", iters = 500, reg_m = reg_m, data_set = "paviaU", purity_test = False)   
+
+print(fails)

@@ -1,0 +1,8 @@
+cost=L^2
+n_atoms=1
+mu=0.001
+reg=0.07
+n_restarts=1
+max_iter=1
+sample size=7456
+num clusters=9

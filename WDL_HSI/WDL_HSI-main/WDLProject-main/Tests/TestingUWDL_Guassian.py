@@ -205,6 +205,44 @@ def sinkhorn_unbalanced_batched(a, b, C, reg, reg_m, numMaxIter = 100):
     return linear_costs
 
 
+def bregmanBary(D: torch.Tensor,
+                weights: torch.Tensor,
+                K: torch.Tensor,
+                reg: float = 1.0,
+                maxiter: int = 5,
+                dev: torch.device = torch.device("cpu"),
+                ):
+    """
+
+    :param D: a (d x m) tensor where d is the size of the support of the distributions
+    and m is the number of dictionary atoms
+    (each column is a new dictionary atom)
+    :param weights: a (m x k) tensor where k is the number of barycenters to compute
+    (each column is a set of weights)
+    :param K: exp(-C/reg)
+    :param reg: the entropic regularization parameter
+    :param maxiter: the maximum number of sinkhorn iterations to run
+    :return: the (d x k) tensor of k barycenters
+    """
+    if len(weights.shape) == 1:
+        weights = weights.view(-1, 1)
+    n_barys = weights.shape[1]
+    n_hists = D.shape[1]
+    # init variables
+    b = torch.ones((n_barys, D.shape[0], D.shape[1]), device=dev).to(torch.double)
+    Kt = K.mT
+
+    # bregman projection loop (as in WDL paper)
+    for i in range(maxiter):
+        phi = torch.matmul(Kt, torch.div(D, torch.matmul(K, b)))
+        p = torch.bmm(phi.log().view(n_barys, -1, n_hists),
+                      weights.mT.view(n_barys, n_hists, 1)).exp()
+        # p = torch.matmul(phi.log(), weights).exp()
+        b = torch.div(p, phi)
+    
+    return p.view(n_barys, -1).mT
+
+
 
 def make_cost_matrix(X):
     n_hists = X.shape[1]
@@ -215,7 +253,7 @@ def make_cost_matrix(X):
 
     return C
 
-def WDL(X, D, C, reg, reg_m, num_epochs = 100, loss_type = "quadratic"):
+def WDL(X, D, C, reg, reg_m, num_epochs = 100, loss_type = "quadratic", type = "uot"):
     weight_length = D.shape[1]
     num_weight_vectors = X.shape[1]
     alpha = torch.ones(weight_length)
@@ -230,11 +268,6 @@ def WDL(X, D, C, reg, reg_m, num_epochs = 100, loss_type = "quadratic"):
     optimizer = Adam(params, lr=1e-2)
 
     #New Step:
-    #Precompute the cost of transport a point in X onto itself.
-    #Then we are going to make the cost = abs(cost - base_cost)
-    base_cost = sinkhorn_unbalanced_batched(X, X, C, reg, reg_m)
-
-    #New Step:
     #Store loss information for each data point on each iteration
     #in order to visualize the learning process.
     #I suspect their are local non-zero minimum that the algorithm is finding
@@ -246,15 +279,17 @@ def WDL(X, D, C, reg, reg_m, num_epochs = 100, loss_type = "quadratic"):
 
         w = torch.nn.functional.softmax(weights, dim = 0)
         # 1. Reconstruct via barycenter
-        p = UOT_barycenter_batched(D, C, reg, reg_m, w)
+        if type == "uot":
+            p = UOT_barycenter_batched(D, C, reg, reg_m, w)
+        elif type == "ot":
+            K = torch.exp(-C / reg)
+            p = bregmanBary(D, weights, K, reg = reg, maxiter= 100)
         #Testing weighted geomeans
         # 2. Compute loss
         if loss_type == "quadratic":
             loss_vector = (p - X)**2
         elif loss_type == "kl":
             loss_vector = p*torch.log((p/X)) - p + X
-        elif loss_type == "uot":
-            loss_vector = (sinkhorn_unbalanced_batched(X, p, C, reg, reg_m) - base_cost)**2
         else:
             print("Loss_type " + loss_type + " is not supported.")
             exit()
@@ -269,7 +304,7 @@ def WDL(X, D, C, reg, reg_m, num_epochs = 100, loss_type = "quadratic"):
         # 3. Backprop and update
         loss.backward()
         optimizer.step()
-        D.data = D.data.clamp(min = 1e-8)
+        D.data = D.data.clamp(min = 1e-15)
         if epoch%25 == 0:
             print("Loss on iteration:", epoch, loss)
     print("Final loss: " + str(loss))
@@ -325,6 +360,44 @@ def plot_reconstruction(X, rec, D, num_epochs, reg, reg_m):
     plt.grid(True)
     plt.show()
 
+def plot_reconstruction_compare(X, rec1, D1, rec2, D2, num_epochs, reg, reg_m):
+    # Clone tensors to avoid modifying originals
+    X = X.detach().clone()
+    rec1 = rec1.detach().clone()
+    D1 = D1.detach().clone()
+    rec2 = rec2.detach().clone()
+    D2 = D2.detach().clone()
+
+    plt.figure(figsize=(10, 6))
+
+    # Plot original data (X) in blue
+    for i in range(X.size(0)):
+        plt.plot(X[i].numpy(), color='blue', alpha=0.5, label='X' if i == 0 else "")
+
+    # Plot first reconstruction (rec1) in red
+    for i in range(rec1.size(0)):
+        plt.plot(rec1[i].numpy(), color='red', alpha=0.5, label='rec1' if i == 0 else "")
+
+    # Plot first dictionary atoms (D1) in green dashed
+    for i in range(D1.size(0)):
+        plt.plot(D1[i].numpy(), color='green', alpha=0.5, linestyle='--', label='D1' if i == 0 else "")
+
+    # Plot second reconstruction (rec2) in orange
+    for i in range(rec2.size(0)):
+        plt.plot(rec2[i].numpy(), color='orange', alpha=0.5, label='rec2' if i == 0 else "")
+
+    # Plot second dictionary atoms (D2) in purple dashed
+    for i in range(D2.size(0)):
+        plt.plot(D2[i].numpy(), color='purple', alpha=0.5, linestyle='--', label='D2' if i == 0 else "")
+
+    plt.title(f"Comparison of Reconstructions and Dictionaries\n"
+              f"num epochs: {num_epochs}, reg: {reg}, reg_m: {reg_m}")
+    plt.legend(prop={'size': 12})
+    plt.xlabel("Support")
+    plt.ylabel("Mass")
+    plt.grid(True)
+    plt.show()
+
 def plot_loss_data(loss_data):
     loss_data = torch.stack(loss_data)
     loss_data = loss_data.clone().detach()
@@ -339,13 +412,13 @@ def plot_loss_data(loss_data):
     plt.show()
 
 # Generate the vector
-def gaussian_vector(mean, std_dev, num_samples, scale):
+def gaussian_vector(mean, std_dev, num_samples, scale = 1):
     # Generate x values centered around the mean
     x = np.linspace(mean - 4*std_dev, mean + 4*std_dev, num_samples)
 
     # Gaussian function
-    gaussian_vector = (1 / (std_dev * np.sqrt(2 * np.pi))) * np.exp(-0.5 * ((x - mean) / std_dev) ** 2) + scale + 1
-
+    gaussian_vector = (1 / (std_dev * np.sqrt(2 * np.pi))) * np.exp(-0.5 * ((x - mean) / std_dev) ** 2)
+    gaussian_vector = gaussian_vector / np.sum(gaussian_vector)
     return gaussian_vector
 
 #Generates the cost matrix
@@ -387,23 +460,32 @@ def unbalanced_transport_cost(C, X, a, b, tau):
 # Parameters for the Gaussian distribution
 mean = 10       # Center of the distribution
 std_dev = 1.0    # Standard deviation (spread)
-num_samples = 100  # Length of the vector
+num_samples = 500  # Length of the vector
 
 
-#Make X
-num_hists = 10
-spread = [.70,.85,1,1.15, 1.3, 4.7, 4.85, 5, 5.15, 5.3]
-spread = [1,2,3,4,5,6,7,8,9,10]
-X = [0 for x in range(num_hists)]
-for i in range(num_hists):
-    X[i] = gaussian_vector(mean, std_dev, num_samples, spread[i]).tolist()
+# --- Step 1: Define the grid ---
+x = np.linspace(-5, 10, 500)
 
-X = torch.tensor(X, dtype = torch.double)
+# --- Step 2: Define two Gaussian distributions with different means and different masses ---
+def gaussian(x, mean, sigma, mass=1.0):
+    g = np.exp(-0.5 * ((x - mean)/sigma)**2)
+    g /= g.sum()  # normalize to 1
+    g *= mass     # scale to desired total mass
+    return g
+
+mu1 = gaussian(x, mean=0, sigma=.5, mass=1.0)
+mu2 = gaussian(x, mean=5, sigma=.5, mass=1)
+mu3 = gaussian(x, mean = 2.5, sigma = .5, mass = 1)
+
+Xinit = np.array([mu1, mu2, mu3])
+
+X = torch.tensor(Xinit, dtype = torch.double)
+
 
 #Make D by sampling randomly from X
 num_atoms = 2
 #random_indices = torch.randperm(X.size(0))[:num_atoms]
-random_indices = torch.tensor([0, 9])
+random_indices = torch.tensor([0, 1])
 D = X[random_indices,:]
 D.requires_grad_(True)
 
@@ -412,113 +494,13 @@ X = X.T
 D = D.T
 
 #Make C
-C = make_cost_matrix(100, 100).to(torch.double)
+C = make_cost_matrix(num_samples, num_samples).to(torch.double)
 
 
-reg = 0
-reg_m = 10
+reg = 0.1
+reg_m = 1
 
-
-# Your input data
-reg = 0
-C = make_cost_matrix(3, 1).to(torch.double)**2
-A = torch.tensor([3,1,2], dtype=torch.double)
-B = torch.tensor([2,2,1], dtype=torch.double)
-Abal = A/torch.sum(A)
-Bbal = B/torch.sum(B)
-
-
-plan_low = ot.unbalanced.lbfgsb_unbalanced(A, B, C, reg, 1)
-print(plan_low)
-plan_mid = ot.unbalanced.lbfgsb_unbalanced(A, B, C, reg, reg_m)
-print(plan_mid)
-mid_cost = unbalanced_transport_cost(C, plan_mid, A, B, reg_m)
-print("Real cost", mid_cost)
-plan_high = ot.emd(Abal, Bbal, C)*math.sqrt(30)
-
-c = 3.3
-plan_int = plan_low*(1-math.exp(-c/reg_m)) + plan_high*(math.exp(-c/reg_m))
-print(plan_int)
-int_cost = unbalanced_transport_cost(C, plan_int, A, B, reg_m)
-print("Interpolated cost", int_cost)
-
-print(plan_high)
-
-
-exit()
-x = torch.tensor([[2,2,1,1,1], [2,3,1,1,7]], dtype = torch.double).T 
-x_reweighted = torch.stack([a,b]).T
-weights = torch.tensor([1/2,1/2], dtype = torch.double)
-c = UOT_barycenter(x, C, reg, reg_m, weights)
-print("Barycenter:              ", c)
-#d = ot.barycenter(x_reweighted, C, reg, weights)
-#print("Barycenter:              ", d)
-print(torch.sum(c))
-print(torch.sqrt(torch.sum(A)*torch.sum(B)))
-
-
-""" 
-A = torch.tensor([1,1,1], dtype = torch.double)
-
-X = [(x+1)/50 for x in range(0,100)]
-Y = [0 for x in range(0,100)]
-
-
-
-for i in range(0,100):
-    A_test = A
-    B_test = A*X[i]
-    cost = sinkhorn_unbalanced(A_test, B_test, C, reg, reg_m, plan = False)
-    Y[i] = cost
-    print(cost)
-
-# Create scatter plot
-plt.plot(X, Y, color='blue', marker='o')
-
-# Add labels and title
-plt.xlabel('Mass multiplier on A')
-plt.ylabel('Cost')
-plt.title('Scatter Plot of Inputs vs Outputs' + " reg: " + str(reg) + " reg_m: " + str(reg_m))
-
-# Show plot
-plt.grid(True)
-plt.show()
- """
-
-
-
-""" 
 num_epochs = 500
-rec, D, loss_data = WDL(X, D, C, reg, reg_m, num_epochs=num_epochs, loss_type = "kl")
-print(torch.sum(D, dim = 0))
-print(torch.sum(X, dim = 0))
-print(torch.sum(rec, dim = 0))
-plot_reconstruction(X.T, rec.T, D.T, num_epochs, reg, reg_m)
-#plot_loss_data(loss_data)
- """
-""" 
-C2 = make_cost_matrix(4, 1).to(torch.double)
-Y = torch.tensor([[.1,.1,.1,.7], [.7,.1,.1,.1]], dtype = torch.double).T
-bary = ot.barycenter(Y, C2, reg)
-bary2 = torch.tensor([.4,.1,.1,.4], dtype = torch.double)
-p1 = ot.sinkhorn(bary, Y[:,0], C2, reg)
-p2 = ot.sinkhorn(bary, Y[:,1], C2, reg)
-p12 = ot.sinkhorn(bary2, Y[:,0], C2, reg)
-p22 = ot.sinkhorn(bary2, Y[:,1], C2, reg)
-print(bary)
-print(bary2)
-cost1 = torch.sum(p1*C2)
-cost2 = torch.sum(p2*C2)
-cost12 = torch.sum(p12*C2)
-cost22 = torch.sum(p22*C2)
-print(cost1)
-print(cost2)
-print(cost12)
-print(cost22)
-print(cost1 + cost2)
-print(cost12 + cost22)
-exit()
- """
-        
-
-    
+rec_uot, D_uot, loss_data = WDL(X, D, C, reg, reg_m, num_epochs=num_epochs, loss_type = "quadratic", type = "uot")
+rec_ot, D_ot, loss_data_ot = WDL(X, D, C, reg, reg_m, num_epochs=num_epochs, loss_type = "quadratic", type = "ot")
+plot_reconstruction_compare(X.T, rec_uot.T, D_uot.T, rec_ot.T, D_ot.T, num_epochs=num_epochs, reg = reg, reg_m = reg_m)
