@@ -839,13 +839,12 @@ def control_loop():
 #mu is a regulatization parameter
 #recip controls mu
 #OT_type: Does a normal run, or an UOT run
-def executeable_control_loop(k ,mu = 1000, reg_m = 10000, OT_type = "OT", iters = 10, data_set = "salinasA", purity_test = False):
+def executeable_control_loop(k ,mu = 1000, reg_m = 10000, reg = .1, OT_type = "OT", iters = 10, data_set = "salinasA", purity_test = False):
     torch.set_default_dtype(torch.float64) 
     dev = torch.device('cpu')
 
     #default
-    #regs = [.06,.07,.08,.09,.1]
-    regs = [.07]                                             
+    regs = [reg]                                          
     mu = 1/mu 
 
     #Data_set controls which data set the test is performed on.
@@ -1237,11 +1236,4 @@ if __name__ == "__main__":
 
 
 
-#Supported data sets are "salinasA", "indian_pines", "pavia", and "paviaU"
-#Salinas
-k = 18
-reg_m = 10000
 
-executeable_control_loop(k = k, OT_type = "OT", iters = 500, reg_m = reg_m, data_set = "paviaU", purity_test = False)   
-
-print(fails)

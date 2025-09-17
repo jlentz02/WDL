@@ -1,8 +1,0 @@
-cost=L^2
-n_atoms=12
-mu=0.001
-reg=0.1
-n_restarts=1
-max_iter=500
-sample size=2000
-num clusters=6
