@@ -23,7 +23,7 @@ pip install -r requirements.txt
 ---
 
 ## Usage
-To run the code, it is necessary to navigate your directory to \WDL\WDL_HSI\WDL_HSI-main\Tests. You can then execute main.py with arguments of your choice. These are explained in the main, but you can customize the number of dictionary learning atoms, the type of optimal transport, the number of learning iterations, the marginal relaxation term, the entropic regularization term, the data set, and whether or not the test evaluates purity or accuracy. 
+To run the code, it is necessary to navigate your directory to \WDL\WDL_HSI\WDL_HSI-main\WDLProject-main\Tests. You can then execute main.py with arguments of your choice. These are explained in the main, but you can customize the number of dictionary learning atoms, the type of optimal transport, the number of learning iterations, the marginal relaxation term, the entropic regularization term, the data set, and whether or not the test evaluates purity or accuracy. 
 
 In addition to the dependencies described above, it is necessary to download the [data_set].mat and [data_set_gt].mat files from https://www.ehu.eus/ccwintco/index.php/Hyperspectral_Remote_Sensing_Scenes. For the Salinas A and Indian pines data sets, download the _correct.mat versions of the data. These have water reflectance, and other broken bands removed. Unfortunately, these files are too large to be uploaded to github. There is no need to rename the files. The code is structured in such a way to read the differing file names. However, this will not be the case if additional data sets are added. 
 
